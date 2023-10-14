@@ -11,12 +11,12 @@
 name: Build OpenWrt
 
 env:
-  REPO_URL: https://github.com/openwrt/openwrt
+  REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
   FEEDS_CONF: feeds.conf.default
-  CONFIG_FILE: .config
-  DIY_P1_SH: scripts/diy-part1.sh
-  DIY_P2_SH: scripts/diy-part2.sh
+  CONFIG_FILE: open.config
+  DIY_P1_SH: diy-part1.sh
+  DIY_P2_SH: diy-part2.sh
   UPLOAD_BIN_DIR: true
   UPLOAD_FIRMWARE: true
   UPLOAD_COWTRANSFER: false
@@ -37,11 +37,11 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v2
+      uses: actions/checkout@main
 
     - name: Initialization environment
       env:
@@ -54,7 +54,7 @@ jobs:
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
-        sudo chown $USER:$GITHUB_USER /workdir
+        sudo chown $USER:$GROUPS /workdir
 
     - name: Clone source code
       working-directory: /workdir
@@ -116,7 +116,7 @@ jobs:
       run: df -hT
 
     - name: Upload bin directory
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@main
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
       with:
         name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
@@ -129,10 +129,10 @@ jobs:
         cd openwrt/bin/targets/*/*
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-        echo "::set-output name=status::success"
+        echo "status=success" >> $GITHUB_ENV
 
     - name: Upload firmware directory
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@main
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
         name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
@@ -145,7 +145,7 @@ jobs:
         curl -fsSL git.io/file-transfer | sh
         ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
         echo "::warning file=cowtransfer.com::$(cat cowtransfer.log | grep https)"
-        echo "::set-output name=url::$(cat cowtransfer.log | grep https | cut -f3 -d" ")"
+        echo "url::$(cat cowtransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_ENV
 
     - name: Upload firmware to WeTransfer
       id: wetransfer
@@ -154,50 +154,39 @@ jobs:
         curl -fsSL git.io/file-transfer | sh
         ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
         echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
-        echo "::set-output name=url::$(cat wetransfer.log | grep https | cut -f3 -d" ")"
+        echo "url=$(cat wetransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_ENV
 
     - name: Generate release tag
-      if: steps.compile.outputs.status == 'success' && env.GITHUB_TOKEN && env.GITHUB_REPOSITORY
+      id: tag
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
-        FILE_DATE=$(date +"%Y-%m-%d")
-        cd $GITHUB_WORKSPACE/openwrt/bin/targets/*/*/$DEVICE_NAME
-        TAG_NAME="${{ env.PREFIX_TAG_NAME }}$FILE_DATE"
-        RELEASE_ID=$(curl -s "https://api.github.com/repos/${{ env.GITHUB_REPOSITORY }}/releases/tags/$TAG_NAME" | grep 'id' | cut -f4 -d'"')
-        if [ -z "$RELEASE_ID" ]; then
-          RELEASE_NAME="OpenWrt AutoCI $FILE_DATE"
-          RELEASE_BODY="Auto build by GitHub Actions. $FILE_DATE"
-          curl -X POST "https://api.github.com/repos/${{ env.GITHUB_REPOSITORY }}/releases" -H "Authorization: token ${{ env.GITHUB_TOKEN }}" -d "{\"tag_name\":\"$TAG_NAME\",\"name\":\"$RELEASE_NAME\",\"body\":\"$RELEASE_BODY\"}"
-        else
-          echo "Release already exists for tag $TAG_NAME."
-        fi
+        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_ENV
+        touch release.txt
+        [ $UPLOAD_COWTRANSFER = true ] && echo "🔗 [Cowtransfer](${{ steps.cowtransfer.outputs.url }})" >> release.txt
+        [ $UPLOAD_WETRANSFER = true ] && echo "🔗 [WeTransfer](${{ steps.wetransfer.outputs.url }})" >> release.txt
+        echo "name=status=success" >> $GITHUB_ENV
 
-    - name: Release
-      if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
-      run: |
-        cd openwrt
-        git config --local user.email "actions@github.com"
-        git config --local user.name "GitHub Actions"
-        git add .
-        git commit -m "Auto compile OpenWrt [AutoCI]"
-        [ -z "$(git status -s)" ] || git push
-        TOKEN=$(curl -s "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" | grep 'upload_url' | cut -f4 -d'"')
-        FILE=$(curl -s "$TOKEN?name=OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}.7z" | cut -f4 -d'"')
-        echo -e "  \n  - [OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}.7z]($FILE)" >> ../../README.md
-        RELEASE_ID=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ env.FILE_DATE }}" | grep 'id' | cut -f4 -d'"')
-        RELEASE_NAME=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ env.FILE_DATE }}" | grep 'name' | cut -f4 -d'"')
-        curl -X POST "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID" -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -d "{\"name\":\"$RELEASE_NAME\",\"body\":\"$(cat message.txt)\"}"
-        rm -f message.txt
+    - name: Upload firmware to release
+      uses: softprops/action-gh-release@v1
+      if: steps.tag.outputs.status == 'success' && !cancelled()
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        body_path: release.txt
+        files: ${{ env.FIRMWARE }}/*
 
-    - name: Send Telegram
-      if: steps.compile.outputs.status == 'success' && env.TELEGRAM_CHAT_ID && env.TELEGRAM_BOT_TOKEN
-      run: |
-        curl -s https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument -F chat_id=${TELEGRAM_CHAT_ID} -F document=@$FIRMWARE -F caption="${{ env.DEVICE_NAME }} - OpenWrt [AutoCI]"
+    - name: Delete workflow runs
+      uses: GitRML/delete-workflow-runs@main
+      with:
+        retain_days: 1
+        keep_minimum_runs: 3
 
-    - name: Send Email
-      if: steps.compile.outputs.status == 'success' && env.EMAIL_ADDRESS && env.EMAIL_SMTP_SERVER && env.EMAIL_SMTP_PORT && env.EMAIL_SMTP_USERNAME && env.EMAIL_SMTP_PASSWORD
-      run: |
-        curl -fsSL git.io/smtpmail.sh | sh -s -- -s $EMAIL_SMTP_SERVER -p $EMAIL_SMTP_PORT -xu $EMAIL_SMTP_USERNAME -xp $EMAIL_SMTP_PASSWORD -t $EMAIL_ADDRESS -o $EMAIL_SMTP_SERVER -u "Build OpenWrt [AutoCI]" -m "OpenWrt compilation is complete, please check the attachment." -a $FIRMWARE
-
-    - name: End
-      if: always()
-      run: exit 0
+    - name: Remove old Releases
+      uses: dev-drprasad/delete-older-releases@v0.1.0
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      with:
+        keep_latest: 3
+        delete_tags: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
