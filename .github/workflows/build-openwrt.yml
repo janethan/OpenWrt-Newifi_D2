@@ -157,19 +157,19 @@ jobs:
         echo "::set-output name=url::$(cat wetransfer.log | grep https | cut -f3 -d" ")"
 
     - name: Generate release tag
-        if: steps.compile.outputs.status == 'success' && env.GITHUB_TOKEN && env.GITHUB_REPOSITORY
-        run: |
-            FILE_DATE=$(date +"%Y-%m-%d")
-            cd $GITHUB_WORKSPACE/openwrt/bin/targets/*/*/$DEVICE_NAME
-            TAG_NAME="${{ env.PREFIX_TAG_NAME }}$FILE_DATE"
-            RELEASE_ID=$(curl -s "https://api.github.com/repos/${{ env.GITHUB_REPOSITORY }}/releases/tags/$TAG_NAME" | grep 'id' | cut -f4 -d'"')
-            if [ -z "$RELEASE_ID" ]; then
-              RELEASE_NAME="OpenWrt AutoCI $FILE_DATE"
-              RELEASE_BODY="Auto build by GitHub Actions. $FILE_DATE"
-              curl -X POST "https://api.github.com/repos/${{ env.GITHUB_REPOSITORY }}/releases" -H "Authorization: token ${{ env.GITHUB_TOKEN }}" -d "{\"tag_name\":\"$TAG_NAME\",\"name\":\"$RELEASE_NAME\",\"body\":\"$RELEASE_BODY\"}"
-            else
-              echo "Release already exists for tag $TAG_NAME."
-            fi
+      if: steps.compile.outputs.status == 'success' && env.GITHUB_TOKEN && env.GITHUB_REPOSITORY
+      run: |
+        FILE_DATE=$(date +"%Y-%m-%d")
+        cd $GITHUB_WORKSPACE/openwrt/bin/targets/*/*/$DEVICE_NAME
+        TAG_NAME="${{ env.PREFIX_TAG_NAME }}$FILE_DATE"
+        RELEASE_ID=$(curl -s "https://api.github.com/repos/${{ env.GITHUB_REPOSITORY }}/releases/tags/$TAG_NAME" | grep 'id' | cut -f4 -d'"')
+        if [ -z "$RELEASE_ID" ]; then
+          RELEASE_NAME="OpenWrt AutoCI $FILE_DATE"
+          RELEASE_BODY="Auto build by GitHub Actions. $FILE_DATE"
+          curl -X POST "https://api.github.com/repos/${{ env.GITHUB_REPOSITORY }}/releases" -H "Authorization: token ${{ env.GITHUB_TOKEN }}" -d "{\"tag_name\":\"$TAG_NAME\",\"name\":\"$RELEASE_NAME\",\"body\":\"$RELEASE_BODY\"}"
+        else
+          echo "Release already exists for tag $TAG_NAME."
+        fi
 
     - name: Release
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
