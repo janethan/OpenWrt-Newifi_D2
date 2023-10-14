@@ -10,20 +10,6 @@
 
 name: Build OpenWrt
 
-env:
-  REPO_URL: https://github.com/coolsnowwolf/lede
-  REPO_BRANCH: master
-  FEEDS_CONF: feeds.conf.default
-  CONFIG_FILE: open.config
-  DIY_P1_SH: diy-part1.sh
-  DIY_P2_SH: diy-part2.sh
-  UPLOAD_BIN_DIR: true
-  UPLOAD_FIRMWARE: true
-  UPLOAD_COWTRANSFER: false
-  UPLOAD_WETRANSFER: true
-  UPLOAD_RELEASE: true
-  TZ: Asia/Shanghai
-
 on:
   repository_dispatch:
   workflow_dispatch:
@@ -32,8 +18,20 @@ on:
         description: 'SSH connection to Actions'
         required: false
         default: 'false'
-#  schedule:
-#    - cron: 0 8 */5 * *
+
+env:
+  REPO_URL: https://github.com/janethan/lede
+  REPO_BRANCH: master
+  FEEDS_CONF: feeds.conf.default
+  CONFIG_FILE: .config
+  DIY_P1_SH: diy-part1.sh
+  DIY_P2_SH: diy-part2.sh
+  UPLOAD_BIN_DIR: false
+  UPLOAD_FIRMWARE: true
+  UPLOAD_COWTRANSFER: false
+  UPLOAD_WETRANSFER: true
+  UPLOAD_RELEASE: false
+  TZ: Asia/Shanghai
 
 jobs:
   build:
@@ -104,9 +102,9 @@ jobs:
       id: compile
       run: |
         cd openwrt
-        echo -e "$(nproc) thread compile"
+        echo -e "$(nproc) thread build."
         make -j$(nproc) || make -j1 || make -j1 V=s
-        echo "::set-output name=status::success"
+        echo "status=success" >> $GITHUB_ENV
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
@@ -129,7 +127,7 @@ jobs:
         cd openwrt/bin/targets/*/*
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-        echo "::set-output name=status::success"
+        echo "status=success" >> $GITHUB_ENV
 
     - name: Upload firmware directory
       uses: actions/upload-artifact@main
@@ -145,7 +143,7 @@ jobs:
         curl -fsSL git.io/file-transfer | sh
         ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
         echo "::warning file=cowtransfer.com::$(cat cowtransfer.log | grep https)"
-        echo "::set-output name=url::$(cat cowtransfer.log | grep https | cut -f3 -d" ")"
+        echo "url=$(cat cowtransfer.log | grep https | cut -f3 -d' ')" >> $GITHUB_ENV
 
     - name: Upload firmware to WeTransfer
       id: wetransfer
@@ -154,39 +152,45 @@ jobs:
         curl -fsSL git.io/file-transfer | sh
         ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
         echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
-        echo "::set-output name=url::$(cat wetransfer.log | grep https | cut -f3 -d" ")"
+        echo "url=$(cat wetransfer.log | grep https | cut -f3 -d' ')" >> $GITHUB_ENV
 
     - name: Generate release tag
       id: tag
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
-        echo "::set-output name=release_tag::$(date +"%Y.%m.%d-%H%M")"
-        touch release.txt
-        [ $UPLOAD_COWTRANSFER = true ] && echo "🔗 [Cowtransfer](${{ steps.cowtransfer.outputs.url }})" >> release.txt
-        [ $UPLOAD_WETRANSFER = true ] && echo "🔗 [WeTransfer](${{ steps.wetransfer.outputs.url }})" >> release.txt
-        echo "::set-output name=status::success"
+        cd openwrt
+        version=$(grep ^DISTRIB_REVISION= openwrt/package/base-files/files/etc/openwrt_release | cut -f2 -d'=')
+        tag_name="${version}_$(date +"%Y%m%d")"
+        echo "tag_name=$tag_name" >> $GITHUB_ENV
+        git config user.name "${GITHUB_ACTOR}"
+        git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+        git tag "$tag_name"
+        git push origin "$tag_name"
 
-    - name: Upload firmware to release
-      uses: softprops/action-gh-release@v1
-      if: steps.tag.outputs.status == 'success' && !cancelled()
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ steps.tag.outputs.release_tag }}
-        body_path: release.txt
-        files: ${{ env.FIRMWARE }}/*
+    - name: Send message to Telegram
+      if: env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID && !cancelled()
+      run: |
+        echo -e "OpenWrt Compilation Finished.\n\n[Job](${{ env.JOB_URL }})"
+        echo -e "Build: [${{ env.BUILD_NAME }}](${{ env.BUILD_URL }})"
+        echo -e "Device: ${{ env.DEVICE_NAME }}"
+        echo -e "Version: ${{ env.FILE_DATE }}"
+        echo -e "Status: Success"
+        echo -e "Download: [CowTransfer](${{ steps.cowtransfer.outputs.url }}) | [WeTransfer](${{ steps.wetransfer.outputs.url }})"
+        curl -sL https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendMessage -d "chat_id=${{ env.TELEGRAM_CHAT_ID }}" -d "text=$(cat)" >/dev/null
 
-    - name: Delete workflow runs
-      uses: GitRML/delete-workflow-runs@main
-      with:
-        retain_days: 1
-        keep_minimum_runs: 3
+    - name: Archive build artifacts
+      if: steps.organize.outputs.status == 'success' && !cancelled()
+      run: mv ${{ env.FIRMWARE }} ../artifacts
 
-    - name: Remove old Releases
-      uses: dev-drprasad/delete-older-releases@v0.1.0
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+    - name: Archive artifacts
+      uses: actions/upload-artifact@main
+      if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
-        keep_latest: 3
-        delete_tags: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        name: OpenWrt_${{ env.DEVICE_NAME }}_${{ env.FILE_DATE }}
+        path: artifacts
+
+    - name: Show cowtransfer and wetransfer url
+      if: steps.cowtransfer.outputs.url || steps.wetransfer.outputs.url
+      run: |
+        echo "CowTransfer URL: ${{ steps.cowtransfer.outputs.url }}"
+        echo "WeTransfer URL: ${{ steps.wetransfer.outputs.url }}"
