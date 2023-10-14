@@ -157,21 +157,19 @@ jobs:
         echo "::set-output name=url::$(cat wetransfer.log | grep https | cut -f3 -d" ")"
 
     - name: Generate release tag
-      id: tag
-      if：
+        if: steps.compile.outputs.status == 'success' && env.GITHUB_TOKEN && env.GITHUB_REPOSITORY
         run: |
-          echo -e "$(cat $GITHUB_WORKSPACE/openwrt/.config|grep CONFIG_VERSION_DIST|sed 's/.*=//')\n"
-          mkdir -p $GITHUB_WORKSPACE/openwrt/bin/targets/*/*/$DEVICE_NAME
-          cd $GITHUB_WORKSPACE/openwrt/bin/targets/*/*/$DEVICE_NAME
-          mv $FIRMWARE .
-          mv $GITHUB_WORKSPACE/openwrt/bin/targets/*/*/sha256sums .
-          mv $GITHUB_WORKSPACE/openwrt/bin/targets/*/*/packages .
-          sha256sum sha256sums | sed 's/\.\//\.\//\.\//' > sha256sums
-          sha256sum * >> sha256sums
-          mv sha256sums $GITHUB_WORKSPACE/openwrt/bin/targets/*/*/
-          rm -rf $GITHUB_WORKSPACE/openwrt/bin/targets/*/*/$DEVICE_NAME
-          echo -e "$(nproc) thread compile\nOpenWrt source code: $REPO_URL\nFirmware: [OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts/94284564)\nCowTransfer: ${{ steps.cowtransfer.outputs.url }}\nWeTransfer: ${{ steps.wetransfer.outputs.url }}" | tee openwrt/message.txt
-          echo -e "GitHub Actions Build OpenWrt" > openwrt/README.md
+            FILE_DATE=$(date +"%Y-%m-%d")
+            cd $GITHUB_WORKSPACE/openwrt/bin/targets/*/*/$DEVICE_NAME
+            TAG_NAME="${{ env.PREFIX_TAG_NAME }}$FILE_DATE"
+            RELEASE_ID=$(curl -s "https://api.github.com/repos/${{ env.GITHUB_REPOSITORY }}/releases/tags/$TAG_NAME" | grep 'id' | cut -f4 -d'"')
+            if [ -z "$RELEASE_ID" ]; then
+              RELEASE_NAME="OpenWrt AutoCI $FILE_DATE"
+              RELEASE_BODY="Auto build by GitHub Actions. $FILE_DATE"
+              curl -X POST "https://api.github.com/repos/${{ env.GITHUB_REPOSITORY }}/releases" -H "Authorization: token ${{ env.GITHUB_TOKEN }}" -d "{\"tag_name\":\"$TAG_NAME\",\"name\":\"$RELEASE_NAME\",\"body\":\"$RELEASE_BODY\"}"
+            else
+              echo "Release already exists for tag $TAG_NAME."
+            fi
 
     - name: Release
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
