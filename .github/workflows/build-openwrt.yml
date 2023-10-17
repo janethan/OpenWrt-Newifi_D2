@@ -229,12 +229,11 @@ jobs:
           echo "Telegram notifications are not configured. Skipping..."
           exit 0
         fi
-        status="$(
-          GitHub Actions Build OpenWrt Status:
+        status="GitHub Actions Build OpenWrt Status:
           Repository: ${{ github.repository }}
           Workflow: ${{ github.workflow }}
           Event: ${{ github.event_name }}
           Status: ${{ job.status }}"
-        )"
+        
         [ -z "$TELEGRAM_BOT_TOKEN" ] || telegram-send "$status"
         [ -z "$TELEGRAM_BOT_TOKEN" ] || curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" -d "chat_id=$TELEGRAM_CHAT_ID&text=$status"
