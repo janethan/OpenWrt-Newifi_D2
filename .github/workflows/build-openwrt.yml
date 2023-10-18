@@ -220,7 +220,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Install telegram-send
-      run: pip install telegram-send
+      run: pip install telegram-send && telegram-send --configure
 
     - name: Telegram Bot 通知
       if: always()
