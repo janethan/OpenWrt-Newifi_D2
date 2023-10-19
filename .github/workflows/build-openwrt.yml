@@ -220,12 +220,11 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    #- name: 安装 telegram-send
-#      env:
-#        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-#        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-#      #run: pip3 install telegram-send && telegram-send --configure --token $TELEGRAM_BOT_TOKEN
-#      run: telegram-send --configure --token $TELEGRAM_BOT_TOKEN
+    - name: 安装 telegram-send
+      env:
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      run: pip install telegram-send && telegram-send --configure --token $TELEGRAM_BOT_TOKEN
 
     - name: Telegram Bot 通知
       if: always()
