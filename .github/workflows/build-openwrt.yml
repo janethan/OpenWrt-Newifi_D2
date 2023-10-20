@@ -226,7 +226,7 @@ jobs:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       run: 
         export TELEGRAM_API_TOKEN="$TELEGRAM_BOT_TOKEN"
-        pip install telegram-send && telegram-send --configure
+        pip install telegram-send -y && telegram-send --configure
 
     - name: Telegram Bot 通知
       if: always()
