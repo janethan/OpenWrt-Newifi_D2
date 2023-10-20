@@ -224,7 +224,9 @@ jobs:
       env:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      run: pip install telegram-send && telegram-send --configure --token $TELEGRAM_BOT_TOKEN
+      run: 
+        export TELEGRAM_API_TOKEN="$TELEGRAM_BOT_TOKEN"
+        pip install telegram-send && telegram-send --configure
 
     - name: Telegram Bot 通知
       if: always()
@@ -236,7 +238,7 @@ jobs:
           echo "Telegram notifications are not configured. Skipping..."
           exit 0
         fi
-        telegram-send --configure --token $TELEGRAM_BOT_TOKEN
+        #telegram-send --configure
         status="GitHub Actions Build OpenWrt Status:
           Repository: ${{ github.repository }}
           Workflow: ${{ github.workflow }}
